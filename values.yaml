@@ -1,7 +1,7 @@
 ---
-elasticsearchHosts: "http://elasticsearch-master:9200"
+elasticsearchHosts: "https://elasticsearch-master.elastic:9200"
 
-replicas: 1
+replicas: 2
 
 # Extra environment variables to append to this nodeGroup
 # This will be appended to the current 'env:' key. You can use any of the kubernetes env
@@ -9,16 +9,29 @@ replicas: 1
 extraEnvs:
   - name: "NODE_OPTIONS"
     value: "--max-old-space-size=1800"
-  - name: "ELASTICSEARCH_USERNAME"
-    valueFrom:
-      secretKeyRef:
-        name: elasticsearch-master-credentials
-        key: username
-  - name: "ELASTICSEARCH_PASSWORD"
-    valueFrom:
-      secretKeyRef:
-        name: elasticsearch-master-credentials
-        key: password
+  # - name: "ELASTICSEARCH_USERNAME"
+  #   value: "admin"
+    # valueFrom:
+    #   secretKeyRef:
+    #     name: elasticsearch-master-credentials
+    #     key: username
+  # - name: "ELASTICSEARCH_PASSWORD"
+  #   value: "elastic"
+  #   # valueFrom:
+    #   secretKeyRef:
+    #     name: elasticsearch-master-credentials
+    #     key: password
+  # - name: "SERVER_BASEPATH"
+  #   value: "/elastickibana"
+  # - name: "SERVER_REWRITEBASEPATH"
+  #   value: "false"
+  # - name: "SERVER_PUBLICBASEURL"
+  #   value: "https://bifrost.tippee.co/elastickibana"
+  # - name: "ELASTICSEARCH_SERVICEACCOUNTTOKEN"
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: elastic-service-aws-token-pthsd
+  #       key: token
 #  - name: MY_ENVIRONMENT_VAR
 #    value: the_value_goes_here
 
@@ -32,17 +45,20 @@ envFrom: []
 # A list of secrets and their paths to mount inside the pod
 # This is useful for mounting certificates for security and for mounting
 # the X-Pack license
-secretMounts: []
+secretMounts:
+ - name: elastic-certificates
+   secretName: elasticsearch-master-certs
+   path: /usr/share/kibana/config/certs
+   defaultMode: 0755
 #  - name: kibana-keystore
 #    secretName: kibana-keystore
 #    path: /usr/share/kibana/data/kibana.keystore
 #    subPath: kibana.keystore # optional
 
 hostAliases: []
-#- ip: "127.0.0.1"
-#  hostnames:
-#  - "foo.local"
-#  - "bar.local"
+# - ip: "127.0.0.1"
+#   hostnames:
+#   - "elasticsearch-master.elastic"
 
 image: "docker.elastic.co/kibana/kibana"
 imageTag: "8.1.0"
@@ -72,7 +88,30 @@ healthCheckPath: "/app/kibana"
 
 # Allows you to add any config files in /usr/share/kibana/config/
 # such as kibana.yml
-kibanaConfig: {}
+kibanaConfig:
+  kibana.yml: |
+    server.port: 5601
+    server.host: "0.0.0.0"
+    server.basePath: "/elastickibana"
+    server.rewriteBasePath: true
+    server.publicBaseUrl: "https://bifrost.tippee.co/elastickibana"
+    server.name: "bifrost.tippee.co"
+    server.ssl.enabled: false
+    # server.ssl.key: /usr/share/kibana/config/certs/tls.key
+    # server.ssl.certificate: /usr/share/kibana/config/certs/tls.crt
+    # xpack.reporting.encryptionKey: "58fa5601475858d49731f836d2686eb9"
+    # xpack.security.encryptionKey: "1cb3ccd534fc4391e94d7b0b57177129"
+    elasticsearch.hosts: [ "https://elasticsearch-master.elastic:9200" ]
+    # elasticsearch.serviceAccountToken: "AAEAAWVsYXN0aWMva2liYW5hL3Rva2VuNDpmRXF3NnJzVlFlLWJTVThTUUJTSDJ3"
+    # xpack.reporting.roles.enabled: "false"
+    elasticsearch.username: "kibana_system"
+    elasticsearch.password: "elastic"
+    elasticsearch.requestTimeout: 120000
+    elasticsearch.pingTimeout: 120000
+    elasticsearch.ssl.certificateAuthorities: [ "/usr/share/kibana/config/certs/ca.crt" ]
+    elasticsearch.ssl.verificationMode: certificate
+    elasticsearch.ssl.certificate: /usr/share/kibana/config/certs/tls.crt
+    elasticsearch.ssl.key: /usr/share/kibana/config/certs/tls.key
 #   kibana.yml: |
 #     key:
 #       nestedkey: value
@@ -86,14 +125,14 @@ securityContext:
   capabilities:
     drop:
       - ALL
-  # readOnlyRootFilesystem: true
+  readOnlyRootFilesystem: false
   runAsNonRoot: true
   runAsUser: 1000
 
 serviceAccount: ""
 
 # Whether or not to automount the service account token in the pod. Normally, Kibana does not need this
-automountToken: true
+automountToken: false
 
 # This is the PriorityClass settings as defined in
 # https://kubernetes.io/docs/concepts/configuration/pod-priority-preemption/#priorityclass
@@ -132,7 +171,8 @@ service:
   port: 5601
   nodePort: ""
   labels: {}
-  annotations: {}
+  annotations:
+    konghq.com/protocol: http
   # cloud.google.com/load-balancer-type: "Internal"
   # service.beta.kubernetes.io/aws-load-balancer-internal: 0.0.0.0/0
   # service.beta.kubernetes.io/azure-load-balancer-internal: "true"
@@ -143,20 +183,24 @@ service:
   httpPortName: http
 
 ingress:
-  enabled: false
-  className: "nginx"
+  enabled: true
+  className: "kong"
   pathtype: ImplementationSpecific
-  annotations: {}
+  annotations:
+    konghq.com/preserve-host: "true"
+    konghq.com/protocols: https, http
+    konghq.com/strip-path: "false"
+    nlb.ingress.kubernetes.io/actions.ssl-redirect: "true"
   # kubernetes.io/ingress.class: nginx
   # kubernetes.io/tls-acme: "true"
   hosts:
-    - host: kibana-example.local
+    - host: bifrost.tippee.co
       paths:
-        - path: /
-  #tls: []
-  #  - secretName: chart-example-tls
-  #    hosts:
-  #      - chart-example.local
+        - path: /elastickibana
+  tls:
+   - secretName: w-tippee-co
+     hosts:
+       - bifrost.tippee.co
 
 readinessProbe:
   enabled: false
@@ -168,8 +212,20 @@ readinessProbe:
 
 imagePullSecrets: []
 nodeSelector: {}
-tolerations: []
-affinity: {}
+tolerations:
+  - key: dedicated
+    operator: Equal
+    effect: NoSchedule
+    value: apps
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: purpose
+              operator: In
+              values:
+                - apps
 
 nameOverride: ""
 fullnameOverride: ""
@@ -183,4 +239,4 @@ lifecycle: {}
 #     command: ["/bin/sh", "-c", "echo Hello from the postStart handler > /usr/share/message"]
 
 # Deprecated - use only with versions < 6.6
-elasticsearchURL: "" # "http://elasticsearch-master:9200"
+elasticsearchURL: "https://elasticsearch-master.elastic:9200" # "http://elasticsearch-master:9200"
